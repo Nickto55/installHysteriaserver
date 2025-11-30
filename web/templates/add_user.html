@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить пользователя - Hysteria UI{% endblock %}
+
+{% block content %}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-person-plus-fill"></i> Добавить пользователя
+    </h1>
+    <a href="{{ url_for('users') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Назад к списку
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">Информация о пользователе</h6>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('add_user') }}">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="username" class="form-label">
+                                    Имя пользователя <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="username" name="username" 
+                                       placeholder="username" required>
+                                <small class="form-text text-muted">Уникальное имя пользователя</small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="password" class="form-label">
+                                    Пароль
+                                </label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="password" name="password" 
+                                           placeholder="Оставьте пустым для автогенерации">
+                                    <button class="btn btn-outline-secondary" type="button" 
+                                            onclick="generatePassword()">
+                                        <i class="bi bi-arrow-repeat"></i> Генерировать
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted">Если оставить пустым, будет сгенерирован автоматически</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="upload_mbps" class="form-label">
+                                    Скорость загрузки (Mbps)
+                                </label>
+                                <input type="number" class="form-control" id="upload_mbps" 
+                                       name="upload_mbps" value="100" min="1">
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="download_mbps" class="form-label">
+                                    Скорость скачивания (Mbps)
+                                </label>
+                                <input type="number" class="form-control" id="download_mbps" 
+                                       name="download_mbps" value="100" min="1">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="total_traffic_gb" class="form-label">
+                                    Лимит трафика (GB)
+                                </label>
+                                <input type="number" class="form-control" id="total_traffic_gb" 
+                                       name="total_traffic_gb" value="0" min="0">
+                                <small class="form-text text-muted">0 = безлимит</small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="expiry_date" class="form-label">
+                                    Дата истечения
+                                </label>
+                                <input type="date" class="form-control" id="expiry_date" name="expiry_date">
+                                <small class="form-text text-muted">Оставьте пустым для бессрочного доступа</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <a href="{{ url_for('users') }}" class="btn btn-secondary">
+                            <i class="bi bi-x-circle"></i> Отмена
+                        </a>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-check-circle"></i> Создать пользователя
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-info-circle"></i> Справка
+                </h6>
+            </div>
+            <div class="card-body">
+                <h6>Имя пользователя</h6>
+                <p class="small text-muted">
+                    Уникальный идентификатор пользователя. Используется только в панели управления.
+                </p>
+
+                <h6>Пароль</h6>
+                <p class="small text-muted">
+                    Пароль для подключения к серверу Hysteria. Если не указан, будет сгенерирован автоматически.
+                </p>
+
+                <h6>Скорость</h6>
+                <p class="small text-muted">
+                    Максимальная скорость загрузки и скачивания для пользователя (в Mbps).
+                </p>
+
+                <h6>Лимит трафика</h6>
+                <p class="small text-muted">
+                    Максимальный объем трафика в GB. 0 означает безлимитный тариф.
+                </p>
+
+                <h6>Дата истечения</h6>
+                <p class="small text-muted">
+                    Дата, после которой доступ пользователя будет автоматически отключен.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function generatePassword() {
+    const length = 16;
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+    let password = "";
+    for (let i = 0; i < length; i++) {
+        password += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    document.getElementById('password').value = password;
+}
+</script>
+{% endblock %}

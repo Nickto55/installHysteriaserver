@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Информация о подключении - Hysteria UI{% endblock %}
+
+{% block content %}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-qr-code"></i> Информация о подключении: {{ user.username }}
+    </h1>
+    <a href="{{ url_for('users') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Назад к списку
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card shadow mb-4">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-link-45deg"></i> Hysteria2 URL
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> 
+                    Скопируйте эту ссылку и импортируйте в клиент Hysteria2
+                </div>
+                
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="hysteria-url" 
+                           value="{{ hysteria_url }}" readonly>
+                    <button class="btn btn-primary" onclick="copyURL()">
+                        <i class="bi bi-clipboard"></i> Копировать
+                    </button>
+                </div>
+
+                <h6 class="mt-4">Параметры подключения:</h6>
+                <table class="table table-bordered">
+                    <tr>
+                        <th width="30%">Сервер:</th>
+                        <td><code>{{ settings.server_ip or 'SERVER_IP' }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>Порт:</th>
+                        <td><code>{{ settings.server_port }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>Протокол:</th>
+                        <td><code>Hysteria2</code></td>
+                    </tr>
+                    <tr>
+                        <th>Пароль:</th>
+                        <td>
+                            <code>{{ user.password }}</code>
+                            <button class="btn btn-sm btn-outline-secondary" 
+                                    onclick="copyToClipboard('{{ user.password }}')">
+                                <i class="bi bi-clipboard"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>TLS:</th>
+                        <td><span class="badge bg-warning">Self-signed (insecure=1)</span></td>
+                    </tr>
+                    <tr>
+                        <th>Имя пользователя:</th>
+                        <td><code>{{ user.username }}</code></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-download"></i> Настройка клиента
+                </h6>
+            </div>
+            <div class="card-body">
+                <h6>Шаги для подключения:</h6>
+                <ol>
+                    <li>Скачайте клиент Hysteria2 для вашей платформы:
+                        <ul>
+                            <li><strong>Windows/macOS/Linux:</strong> 
+                                <a href="https://github.com/apernet/hysteria/releases" target="_blank">
+                                    https://github.com/apernet/hysteria/releases
+                                </a>
+                            </li>
+                            <li><strong>Android:</strong> Используйте v2rayNG или NekoBox</li>
+                            <li><strong>iOS:</strong> Используйте Shadowrocket или Stash</li>
+                        </ul>
+                    </li>
+                    <li>Импортируйте Hysteria2 URL (используйте кнопку "Копировать" выше)</li>
+                    <li>Или введите параметры подключения вручную</li>
+                    <li>Подключитесь к серверу</li>
+                </ol>
+
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i> 
+                    <strong>Важно:</strong> Убедитесь, что в настройках клиента включена опция 
+                    "Игнорировать проверку сертификата" (insecure) или "Allow Insecure", 
+                    так как используется самоподписанный сертификат.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow mb-3">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary text-center">
+                    <i class="bi bi-qr-code-scan"></i> QR-код
+                </h6>
+            </div>
+            <div class="card-body text-center">
+                <img src="{{ qr_code }}" alt="QR Code" class="img-fluid">
+                <p class="small text-muted mt-3">
+                    Отсканируйте QR-код в мобильном клиенте
+                </p>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-person-badge"></i> Информация о пользователе
+                </h6>
+            </div>
+            <div class="card-body">
+                <p><strong>Имя:</strong> {{ user.username }}</p>
+                <p><strong>Статус:</strong> 
+                    {% if user.is_active %}
+                        <span class="badge bg-success">Активен</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Отключен</span>
+                    {% endif %}
+                </p>
+                <p><strong>Скорость:</strong><br>
+                    <span class="badge bg-primary">↑ {{ user.upload_mbps }} Mbps</span>
+                    <span class="badge bg-info">↓ {{ user.download_mbps }} Mbps</span>
+                </p>
+                <p><strong>Лимит трафика:</strong><br>
+                    {% if user.total_traffic_gb > 0 %}
+                        {{ user.total_traffic_gb }} GB
+                    {% else %}
+                        ∞ Безлимит
+                    {% endif %}
+                </p>
+                <p><strong>Использовано:</strong><br>{{ "%.2f"|format(user.used_traffic_gb) }} GB</p>
+                <p><strong>Срок действия:</strong><br>
+                    {% if user.expiry_date %}
+                        {{ user.expiry_date }}
+                    {% else %}
+                        Бессрочно
+                    {% endif %}
+                </p>
+                
+                <hr>
+                
+                <a href="{{ url_for('edit_user', user_id=user.id) }}" class="btn btn-warning w-100">
+                    <i class="bi bi-pencil-fill"></i> Редактировать
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function copyURL() {
+    const urlField = document.getElementById('hysteria-url');
+    urlField.select();
+    urlField.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(urlField.value).then(function() {
+        alert('Hysteria2 URL скопирован в буфер обмена!');
+    });
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(function() {
+        alert('Скопировано в буфер обмена!');
+    });
+}
+</script>
+{% endblock %}

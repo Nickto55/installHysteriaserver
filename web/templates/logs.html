@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Логи - Hysteria UI{% endblock %}
+
+{% block content %}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-file-text-fill"></i> Логи Hysteria
+    </h1>
+    <button class="btn btn-primary" onclick="location.reload()">
+        <i class="bi bi-arrow-clockwise"></i> Обновить
+    </button>
+</div>
+
+<div class="card shadow">
+    <div class="card-header">
+        <h6 class="m-0 font-weight-bold text-primary">
+            Последние 100 записей из журнала systemd
+        </h6>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> 
+            Логи обновляются в реальном времени. Используйте кнопку "Обновить" для получения свежих данных.
+        </div>
+
+        <pre class="bg-dark text-light p-3" style="max-height: 600px; overflow-y: scroll; font-size: 0.85rem;">{{ logs }}</pre>
+        
+        <div class="mt-3">
+            <div class="alert alert-secondary">
+                <strong>Полезные команды для просмотра логов через SSH:</strong>
+                <ul class="mb-0 mt-2">
+                    <li><code>journalctl -u hysteria -f</code> - Просмотр логов в реальном времени</li>
+                    <li><code>journalctl -u hysteria -n 100</code> - Последние 100 записей</li>
+                    <li><code>journalctl -u hysteria --since "1 hour ago"</code> - Логи за последний час</li>
+                    <li><code>systemctl status hysteria</code> - Статус сервиса</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-gear-fill"></i> Управление сервисом
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-success" onclick="restartServer()">
+                        <i class="bi bi-arrow-clockwise"></i> Перезапустить Hysteria
+                    </button>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                        <i class="bi bi-house-fill"></i> Вернуться на главную
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-question-circle"></i> Что искать в логах?
+                </h6>
+            </div>
+            <div class="card-body">
+                <ul class="small">
+                    <li><strong class="text-success">Started</strong> - Сервер запущен</li>
+                    <li><strong class="text-danger">Failed</strong> - Ошибка запуска</li>
+                    <li><strong class="text-info">Connection</strong> - Подключение клиента</li>
+                    <li><strong class="text-warning">Error</strong> - Ошибка в работе</li>
+                    <li><strong>UDP</strong> - UDP трафик</li>
+                    <li><strong>TCP</strong> - TCP трафик</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function restartServer() {
+    if (confirm('Перезапустить сервер Hysteria?')) {
+        fetch('/api/restart')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Сервер перезапущен. Обновите страницу через несколько секунд.');
+                    setTimeout(() => location.reload(), 3000);
+                } else {
+                    alert('Ошибка при перезапуске: ' + data.message);
+                }
+            });
+    }
+}
+
+// Автообновление логов каждые 30 секунд
+setInterval(() => {
+    location.reload();
+}, 30000);
+</script>
+{% endblock %}

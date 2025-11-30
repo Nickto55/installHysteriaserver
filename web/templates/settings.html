@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Настройки - Hysteria UI{% endblock %}
+
+{% block content %}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-gear-fill"></i> Настройки
+    </h1>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card shadow mb-4">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-server"></i> Настройки сервера
+                </h6>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('settings') }}">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="server_ip" class="form-label">
+                                    IP адрес сервера <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="server_ip" name="server_ip" 
+                                       value="{{ settings.server_ip }}" placeholder="1.2.3.4" required>
+                                <small class="form-text text-muted">
+                                    Публичный IP адрес вашего VPS
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="server_port" class="form-label">
+                                    Порт Hysteria сервера
+                                </label>
+                                <input type="number" class="form-control" id="server_port" name="server_port" 
+                                       value="{{ settings.server_port }}" min="1" max="65535">
+                                <small class="form-text text-muted">
+                                    Порт для Hysteria (по умолчанию: 443)
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="cert_path" class="form-label">
+                                    Путь к сертификату
+                                </label>
+                                <input type="text" class="form-control" id="cert_path" name="cert_path" 
+                                       value="{{ settings.cert_path }}">
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="key_path" class="form-label">
+                                    Путь к приватному ключу
+                                </label>
+                                <input type="text" class="form-control" id="key_path" name="key_path" 
+                                       value="{{ settings.key_path }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <h6 class="text-primary mb-3">
+                        <i class="bi bi-display"></i> Настройки панели
+                    </h6>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="panel_port" class="form-label">
+                                    Порт веб-панели
+                                </label>
+                                <input type="number" class="form-control" id="panel_port" name="panel_port" 
+                                       value="{{ settings.panel_port }}" min="1" max="65535">
+                                <small class="form-text text-muted">
+                                    Порт для доступа к панели управления
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="panel_path" class="form-label">
+                                    URL путь панели
+                                </label>
+                                <input type="text" class="form-control" id="panel_path" name="panel_path" 
+                                       value="{{ settings.panel_path }}">
+                                <small class="form-text text-muted">
+                                    Базовый путь для доступа к панели
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Сохранить настройки
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-shield-lock-fill"></i> Изменить пароль администратора
+                </h6>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('settings') }}">
+                    <div class="mb-3">
+                        <label for="old_password" class="form-label">
+                            Текущий пароль
+                        </label>
+                        <input type="password" class="form-control" id="old_password" name="old_password">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="new_password" class="form-label">
+                            Новый пароль
+                        </label>
+                        <input type="password" class="form-control" id="new_password" name="new_password">
+                    </div>
+
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i> 
+                        После смены пароля вам нужно будет войти заново
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-key-fill"></i> Изменить пароль
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow mb-3">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-hdd-network"></i> Управление сервером
+                </h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    Управление сервисом Hysteria
+                </p>
+                
+                <button class="btn btn-success w-100 mb-2" onclick="restartServer()">
+                    <i class="bi bi-arrow-clockwise"></i> Перезапустить сервер
+                </button>
+                
+                <a href="{{ url_for('logs') }}" class="btn btn-info w-100">
+                    <i class="bi bi-file-text-fill"></i> Просмотреть логи
+                </a>
+            </div>
+        </div>
+
+        <div class="card shadow mb-3">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-info-circle"></i> О системе
+                </h6>
+            </div>
+            <div class="card-body">
+                <p><strong>Версия:</strong> Hysteria UI 1.0</p>
+                <p><strong>Протокол:</strong> Hysteria v2</p>
+                <p><strong>Платформа:</strong> Python Flask</p>
+                <p class="mb-0"><strong>Администратор:</strong> {{ session.admin_username }}</p>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-book"></i> Документация
+                </h6>
+            </div>
+            <div class="card-body">
+                <p class="small">
+                    Официальная документация Hysteria:
+                </p>
+                <a href="https://v2.hysteria.network/" target="_blank" class="btn btn-sm btn-outline-primary w-100 mb-2">
+                    <i class="bi bi-link-45deg"></i> v2.hysteria.network
+                </a>
+                <a href="https://github.com/apernet/hysteria" target="_blank" class="btn btn-sm btn-outline-secondary w-100">
+                    <i class="bi bi-github"></i> GitHub Repository
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function restartServer() {
+    if (confirm('Вы уверены, что хотите перезапустить сервер Hysteria?')) {
+        fetch('/api/restart')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Сервер успешно перезапущен!');
+                } else {
+                    alert('Ошибка при перезапуске сервера');
+                }
+            });
+    }
+}
+</script>
+{% endblock %}

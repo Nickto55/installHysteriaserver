@@ -35,6 +35,8 @@ HYSTERIA_CONFIG_DIR="/etc/hysteria"
 HYSTERIA_CONFIG_FILE="${HYSTERIA_CONFIG_DIR}/config.yaml"
 HYSTERIA_SERVICE="/etc/systemd/system/hysteria.service"
 HYSTERIA_LOG="/var/log/hysteria.log"
+HYSTERIA_UI_DIR="/opt/hysteria-ui"
+HYSTERIA_UI_SERVICE="/etc/systemd/system/hysteria-ui.service"
 
 # ============================================================================
 # Проверка прав root (аналогично 3x-ui)
@@ -117,30 +119,30 @@ install_base() {
         # Debian/Ubuntu
         echo -e "${green}Обнаружен APT (Debian/Ubuntu)${plain}"
         apt-get update
-        apt-get install -y wget curl tar tzdata qrencode ca-certificates
+        apt-get install -y wget curl tar tzdata qrencode ca-certificates python3 python3-pip python3-venv openssl
         
     elif command -v yum &>/dev/null; then
         # CentOS/RHEL
         echo -e "${green}Обнаружен YUM (CentOS/RHEL)${plain}"
         yum update -y
-        yum install -y wget curl tar tzdata qrencode ca-certificates
+        yum install -y wget curl tar tzdata qrencode ca-certificates python3 python3-pip openssl
         
     elif command -v dnf &>/dev/null; then
         # Fedora
         echo -e "${green}Обнаружен DNF (Fedora)${plain}"
         dnf update -y
-        dnf install -y wget curl tar tzdata qrencode ca-certificates
+        dnf install -y wget curl tar tzdata qrencode ca-certificates python3 python3-pip openssl
         
     elif command -v zypper &>/dev/null; then
         # OpenSUSE
         echo -e "${green}Обнаружен Zypper (OpenSUSE)${plain}"
         zypper refresh
-        zypper install -y wget curl tar timezone qrencode ca-certificates
+        zypper install -y wget curl tar timezone qrencode ca-certificates python3 python3-pip openssl
         
     elif command -v pacman &>/dev/null; then
         # Arch Linux
         echo -e "${green}Обнаружен Pacman (Arch Linux)${plain}"
-        pacman -Sy --noconfirm wget curl tar tzdata qrencode ca-certificates
+        pacman -Sy --noconfirm wget curl tar tzdata qrencode ca-certificates python python-pip openssl
         
     else
         echo -e "${red}Ошибка: Неподдерживаемый пакетный менеджер${plain}"
@@ -180,13 +182,12 @@ install_hysteria() {
         exit 1
     fi
     
-    # Удаление префикса 'v' если есть
-    latest_version=${latest_version#v}
+    # Сохраняем версию с префиксом 'v' для тега
     echo -e "${green}Последняя версия: $latest_version${plain}"
     
     # Формирование имени файла
     local download_file="hysteria-linux-${cpu_arch}"
-    local download_url="https://github.com/apernet/hysteria/releases/download/app/v${latest_version}/${download_file}"
+    local download_url="https://github.com/apernet/hysteria/releases/download/${latest_version}/${download_file}"
     
     echo -e "${blue}Скачивание Hysteria v2...${plain}"
     echo -e "${yellow}URL: $download_url${plain}"
@@ -279,34 +280,124 @@ obtain_certificate() {
 }
 
 # ============================================================================
+# Установка веб-панели Hysteria UI
+# ============================================================================
+install_web_panel() {
+    echo -e "${blue}Установка веб-панели Hysteria UI...${plain}"
+    
+    # Создание директории
+    mkdir -p "$HYSTERIA_UI_DIR"
+    
+    # Определение текущей директории скрипта
+    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    
+    # Копирование файлов веб-панели
+    if [[ -d "${SCRIPT_DIR}/web" ]]; then
+        echo -e "${blue}Копирование файлов веб-панели...${plain}"
+        cp -r "${SCRIPT_DIR}/web/"* "$HYSTERIA_UI_DIR/"
+    else
+        echo -e "${yellow}Директория web/ не найдена, скачиваем с GitHub...${plain}"
+        
+        # Скачивание файлов с GitHub (если репозиторий существует)
+        cd "$HYSTERIA_UI_DIR"
+        
+        # Создание основных файлов если их нет
+        mkdir -p templates static
+        
+        echo -e "${red}Файлы веб-панели не найдены. Разместите директорию 'web/' рядом со скриптом${plain}"
+        return 1
+    fi
+    
+    # Установка Python зависимостей
+    echo -e "${blue}Установка Python зависимостей...${plain}"
+    cd "$HYSTERIA_UI_DIR"
+    
+    # Создание виртуального окружения
+    echo -e "${blue}Создание виртуального окружения Python...${plain}"
+    python3 -m venv venv
+    
+    # Активация виртуального окружения и установка зависимостей
+    source venv/bin/activate
+    
+    if [[ -f "requirements.txt" ]]; then
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    else
+        pip install Flask Werkzeug qrcode Pillow PyYAML
+    fi
+    
+    deactivate
+    
+    # Создание systemd сервиса для веб-панели
+    echo -e "${blue}Создание systemd сервиса для веб-панели...${plain}"
+    
+    cat > "$HYSTERIA_UI_SERVICE" <<EOF
+[Unit]
+Description=Hysteria UI Web Panel
+After=network.target hysteria.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${HYSTERIA_UI_DIR}
+ExecStart=${HYSTERIA_UI_DIR}/venv/bin/python3 ${HYSTERIA_UI_DIR}/app.py
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Перезагрузка systemd и запуск сервиса
+    systemctl daemon-reload
+    systemctl enable hysteria-ui
+    systemctl start hysteria-ui
+    
+    sleep 2
+    if systemctl is-active --quiet hysteria-ui; then
+        echo -e "${green}✓ Веб-панель Hysteria UI успешно запущена!${plain}"
+        return 0
+    else
+        echo -e "${red}✗ Ошибка запуска веб-панели${plain}"
+        echo -e "${yellow}Проверьте логи: journalctl -u hysteria-ui -n 50${plain}"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Генерация самоподписанного сертификата
+# ============================================================================
+generate_self_signed_cert() {
+    echo -e "${blue}Генерация самоподписанного сертификата...${plain}"
+    
+    mkdir -p "$HYSTERIA_CONFIG_DIR"
+    
+    # Генерация приватного ключа и сертификата
+    openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
+        -keyout "${HYSTERIA_CONFIG_DIR}/private.key" \
+        -out "${HYSTERIA_CONFIG_DIR}/cert.crt" \
+        -subj "/CN=hysteria.local" \
+        -days 36500 2>/dev/null
+    
+    if [[ $? -eq 0 ]]; then
+        chmod 644 "${HYSTERIA_CONFIG_DIR}/cert.crt"
+        chmod 600 "${HYSTERIA_CONFIG_DIR}/private.key"
+        echo -e "${green}Самоподписанный сертификат создан${plain}"
+        return 0
+    else
+        echo -e "${red}Ошибка: Не удалось создать сертификат${plain}"
+        return 1
+    fi
+}
+
+# ============================================================================
 # Настройка Hysteria v2
 # ============================================================================
 config_hysteria() {
     echo -e "${blue}=== Настройка Hysteria v2 ===${plain}"
     
-    # Запрос доменного имени
-    echo -e "${yellow}Введите доменное имя, которое указывает на IP этого сервера:${plain}"
-    read -p "Домен: " domain
-    
-    if [[ -z "$domain" ]]; then
-        echo -e "${red}Ошибка: Домен не может быть пустым${plain}"
-        exit 1
-    fi
-    
-    # Проверка корректности домена
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
-        echo -e "${red}Ошибка: Некорректный формат домена${plain}"
-        exit 1
-    fi
-    
-    # Установка acme.sh
-    install_acme
-    if [[ $? -ne 0 ]]; then
-        exit 1
-    fi
-    
-    # Получение сертификата
-    obtain_certificate "$domain"
+    # Генерация самоподписанного сертификата
+    generate_self_signed_cert
     if [[ $? -ne 0 ]]; then
         exit 1
     fi
@@ -407,8 +498,8 @@ EOF
         server_ip=$(hostname -I | awk '{print $1}')
     fi
     
-    # Формирование Hysteria2 URL
-    local hysteria_url="hysteria2://${password}@${domain}:443/?insecure=0&sni=${domain}"
+    # Формирование Hysteria2 URL (insecure=1 для самоподписанного сертификата)
+    local hysteria_url="hysteria2://${password}@${server_ip}:443/?insecure=1#Hysteria2"
     
     # Вывод информации для подключения
     echo -e "\n${green}╔═══════════════════════════════════════════════════════════════╗${plain}"
@@ -416,13 +507,11 @@ EOF
     echo -e "${green}╚═══════════════════════════════════════════════════════════════╝${plain}\n"
     
     echo -e "${blue}═══════════════ Информация для подключения ═══════════════${plain}"
-    echo -e "${yellow}Сервер:${plain}      $domain"
     echo -e "${yellow}IP:${plain}          $server_ip"
     echo -e "${yellow}Порт:${plain}        443"
     echo -e "${yellow}Протокол:${plain}    Hysteria2"
     echo -e "${yellow}Пароль:${plain}      $password"
-    echo -e "${yellow}TLS:${plain}         Включён"
-    echo -e "${yellow}SNI:${plain}         $domain"
+    echo -e "${yellow}TLS:${plain}         Самоподписанный сертификат (insecure=1)"
     echo -e "${blue}═══════════════════════════════════════════════════════════${plain}\n"
     
     echo -e "${green}Hysteria2 URL:${plain}"
@@ -445,13 +534,11 @@ EOF
     cat > "$info_file" <<EOF
 Hysteria v2 Connection Information
 ===================================
-Server: $domain
 IP: $server_ip
 Port: 443
 Protocol: Hysteria2
 Password: $password
-TLS: Enabled
-SNI: $domain
+TLS: Self-signed certificate (insecure=1)
 
 Hysteria2 URL:
 $hysteria_url
@@ -460,6 +547,29 @@ Generated: $(date)
 EOF
     
     echo -e "${green}Информация сохранена в: $info_file${plain}"
+    
+    # Установка веб-панели
+    echo -e "\n${blue}═══════════════════════════════════════════════════════════${plain}"
+    echo -e "${yellow}Устанавливаем веб-панель управления...${plain}"
+    echo -e "${blue}═══════════════════════════════════════════════════════════${plain}\n"
+    
+    install_web_panel
+    
+    if [[ $? -eq 0 ]]; then
+        local panel_port="54321"
+        
+        echo -e "\n${green}╔═══════════════════════════════════════════════════════════════╗${plain}"
+        echo -e "${green}║           Веб-панель Hysteria UI установлена!                ║${plain}"
+        echo -e "${green}╚═══════════════════════════════════════════════════════════════╝${plain}\n"
+        
+        echo -e "${blue}═══════════════ Доступ к веб-панели ═══════════════${plain}"
+        echo -e "${yellow}URL:${plain}         http://${server_ip}:${panel_port}"
+        echo -e "${yellow}Логин:${plain}       admin"
+        echo -e "${yellow}Пароль:${plain}      admin"
+        echo -e "${blue}═══════════════════════════════════════════════════${plain}\n"
+        
+        echo -e "${red}⚠ ВАЖНО: Измените пароль администратора после первого входа!${plain}\n"
+    fi
 }
 
 # ============================================================================
@@ -587,11 +697,76 @@ update_hysteria() {
 }
 
 # ============================================================================
+# Управление веб-панелью
+# ============================================================================
+start_panel() {
+    if systemctl is-active --quiet hysteria-ui; then
+        echo -e "${yellow}Веб-панель уже запущена${plain}"
+        return 0
+    fi
+    
+    echo -e "${blue}Запуск веб-панели...${plain}"
+    systemctl start hysteria-ui
+    
+    sleep 2
+    if systemctl is-active --quiet hysteria-ui; then
+        echo -e "${green}✓ Веб-панель успешно запущена${plain}"
+        echo -e "${yellow}URL: http://$(curl -s4 ifconfig.me):54321${plain}"
+    else
+        echo -e "${red}✗ Ошибка запуска веб-панели${plain}"
+        echo -e "${yellow}Проверьте логи: journalctl -u hysteria-ui -n 50${plain}"
+    fi
+}
+
+stop_panel() {
+    if ! systemctl is-active --quiet hysteria-ui; then
+        echo -e "${yellow}Веб-панель уже остановлена${plain}"
+        return 0
+    fi
+    
+    echo -e "${blue}Остановка веб-панели...${plain}"
+    systemctl stop hysteria-ui
+    
+    sleep 2
+    if ! systemctl is-active --quiet hysteria-ui; then
+        echo -e "${green}✓ Веб-панель успешно остановлена${plain}"
+    else
+        echo -e "${red}✗ Ошибка остановки веб-панели${plain}"
+    fi
+}
+
+restart_panel() {
+    echo -e "${blue}Перезапуск веб-панели...${plain}"
+    systemctl restart hysteria-ui
+    
+    sleep 2
+    if systemctl is-active --quiet hysteria-ui; then
+        echo -e "${green}✓ Веб-панель успешно перезапущена${plain}"
+        echo -e "${yellow}URL: http://$(curl -s4 ifconfig.me):54321${plain}"
+    else
+        echo -e "${red}✗ Ошибка перезапуска веб-панели${plain}"
+        echo -e "${yellow}Проверьте логи: journalctl -u hysteria-ui -n 50${plain}"
+    fi
+}
+
+status_panel() {
+    echo -e "${blue}═══════════════ Статус веб-панели ═══════════════${plain}"
+    systemctl status hysteria-ui --no-pager
+    echo -e "${blue}═════════════════════════════════════════════════${plain}"
+    
+    if systemctl is-active --quiet hysteria-ui; then
+        echo -e "\n${green}Веб-панель запущена${plain}"
+        echo -e "${yellow}URL: http://$(curl -s4 ifconfig.me):54321${plain}"
+        echo -e "${yellow}Логин: admin / Пароль: admin${plain}"
+    fi
+}
+
+# ============================================================================
 # Удаление Hysteria
 # ============================================================================
 uninstall_hysteria() {
     echo -e "${red}═══════════════ Удаление Hysteria ═══════════════${plain}"
-    echo -e "${yellow}Это действие удалит Hysteria и все его конфигурации${plain}"
+    echo -e "${yellow}Это действие удалит Hysteria, веб-панель и все конфигурации${plain}"
     read -p "Вы уверены? (y/n): " confirm
     
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
@@ -599,28 +774,58 @@ uninstall_hysteria() {
         return 0
     fi
     
-    # Остановка и отключение сервиса
+    # Остановка и отключение сервиса Hysteria
     if systemctl is-active --quiet hysteria; then
         echo -e "${blue}Остановка Hysteria...${plain}"
         systemctl stop hysteria
     fi
     
     if systemctl is-enabled --quiet hysteria 2>/dev/null; then
-        echo -e "${blue}Отключение автозапуска...${plain}"
+        echo -e "${blue}Отключение автозапуска Hysteria...${plain}"
         systemctl disable hysteria
     fi
     
-    # Удаление systemd сервиса
-    if [[ -f "$HYSTERIA_SERVICE" ]]; then
-        echo -e "${blue}Удаление systemd сервиса...${plain}"
-        rm -f "$HYSTERIA_SERVICE"
-        systemctl daemon-reload
+    # Остановка и отключение веб-панели
+    if systemctl is-active --quiet hysteria-ui; then
+        echo -e "${blue}Остановка веб-панели...${plain}"
+        systemctl stop hysteria-ui
     fi
+    
+    if systemctl is-enabled --quiet hysteria-ui 2>/dev/null; then
+        echo -e "${blue}Отключение автозапуска веб-панели...${plain}"
+        systemctl disable hysteria-ui
+    fi
+    
+    # Удаление systemd сервисов
+    if [[ -f "$HYSTERIA_SERVICE" ]]; then
+        echo -e "${blue}Удаление systemd сервиса Hysteria...${plain}"
+        rm -f "$HYSTERIA_SERVICE"
+    fi
+    
+    if [[ -f "$HYSTERIA_UI_SERVICE" ]]; then
+        echo -e "${blue}Удаление systemd сервиса веб-панели...${plain}"
+        rm -f "$HYSTERIA_UI_SERVICE"
+    fi
+    
+    systemctl daemon-reload
     
     # Удаление бинарного файла
     if [[ -f "$HYSTERIA_BIN" ]]; then
-        echo -e "${blue}Удаление бинарного файла...${plain}"
+        echo -e "${blue}Удаление бинарного файла Hysteria...${plain}"
         rm -f "$HYSTERIA_BIN"
+    fi
+    
+    # Удаление веб-панели
+    if [[ -d "$HYSTERIA_UI_DIR" ]]; then
+        echo -e "${blue}Удаление веб-панели...${plain}"
+        read -p "Удалить веб-панель и базу данных? (y/n): " confirm_panel
+        
+        if [[ "$confirm_panel" == "y" || "$confirm_panel" == "Y" ]]; then
+            rm -rf "$HYSTERIA_UI_DIR"
+            echo -e "${green}Веб-панель удалена${plain}"
+        else
+            echo -e "${yellow}Веб-панель сохранена в: $HYSTERIA_UI_DIR${plain}"
+        fi
     fi
     
     # Удаление конфигурации
@@ -636,7 +841,7 @@ uninstall_hysteria() {
         fi
     fi
     
-    echo -e "${green}✓ Hysteria успешно удалён${plain}"
+    echo -e "${green}✓ Hysteria и веб-панель успешно удалены${plain}"
 }
 
 # ============================================================================
@@ -653,23 +858,30 @@ ${green}╔═══════════════════════
 ${blue}═══════════════════════════════════════════════════════════════${plain}
 ${yellow}  Установка и управление${plain}
 ${blue}═══════════════════════════════════════════════════════════════${plain}
-  ${green}1.${plain} Установить и настроить Hysteria v2
+  ${green}1.${plain} Установить и настроить Hysteria v2 + Веб-панель
   ${green}2.${plain} Запустить Hysteria
   ${green}3.${plain} Остановить Hysteria
   ${green}4.${plain} Перезапустить Hysteria
   ${green}5.${plain} Показать статус Hysteria
   ${green}6.${plain} Показать логи Hysteria
 ${blue}═══════════════════════════════════════════════════════════════${plain}
+${yellow}  Веб-панель${plain}
+${blue}═══════════════════════════════════════════════════════════════${plain}
+  ${green}7.${plain} Запустить веб-панель
+  ${green}8.${plain} Остановить веб-панель
+  ${green}9.${plain} Перезапустить веб-панель
+  ${green}10.${plain} Статус веб-панели
+${blue}═══════════════════════════════════════════════════════════════${plain}
 ${yellow}  Обслуживание${plain}
 ${blue}═══════════════════════════════════════════════════════════════${plain}
-  ${green}7.${plain} Обновить Hysteria
-  ${green}8.${plain} Удалить Hysteria
+  ${green}11.${plain} Обновить Hysteria
+  ${green}12.${plain} Удалить Hysteria и веб-панель
 ${blue}═══════════════════════════════════════════════════════════════${plain}
   ${green}0.${plain} Выход
 ${blue}═══════════════════════════════════════════════════════════════${plain}
 "
     
-    read -p "Выберите действие [0-8]: " choice
+    read -p "Выберите действие [0-12]: " choice
     
     case "$choice" in
         1)
@@ -693,9 +905,21 @@ ${blue}════════════════════════�
             log_hysteria
             ;;
         7)
-            update_hysteria
+            start_panel
             ;;
         8)
+            stop_panel
+            ;;
+        9)
+            restart_panel
+            ;;
+        10)
+            status_panel
+            ;;
+        11)
+            update_hysteria
+            ;;
+        12)
             uninstall_hysteria
             ;;
         0)
@@ -703,7 +927,7 @@ ${blue}════════════════════════�
             exit 0
             ;;
         *)
-            echo -e "${red}Неверный выбор. Пожалуйста, выберите 0-8${plain}"
+            echo -e "${red}Неверный выбор. Пожалуйста, выберите 0-12${plain}"
             ;;
     esac
 }
@@ -720,17 +944,20 @@ show_help() {
     echo -e "  $0 [команда]"
     echo -e ""
     echo -e "${yellow}Команды:${plain}"
-    echo -e "  ${green}install${plain}     - Установить и настроить Hysteria v2"
+    echo -e "  ${green}install${plain}     - Установить и настроить Hysteria v2 + Веб-панель"
     echo -e "  ${green}start${plain}       - Запустить сервис Hysteria"
     echo -e "  ${green}stop${plain}        - Остановить сервис Hysteria"
     echo -e "  ${green}restart${plain}     - Перезапустить сервис Hysteria"
     echo -e "  ${green}status${plain}      - Показать статус сервиса"
     echo -e "  ${green}log${plain}         - Показать логи сервиса"
     echo -e "  ${green}update${plain}      - Обновить Hysteria до последней версии"
-    echo -e "  ${green}uninstall${plain}   - Удалить Hysteria"
+    echo -e "  ${green}uninstall${plain}   - Удалить Hysteria и веб-панель"
     echo -e "  ${green}help${plain}        - Показать эту справку"
     echo -e ""
     echo -e "${yellow}Без аргументов скрипт отображает интерактивное меню${plain}"
+    echo -e ""
+    echo -e "${yellow}Веб-панель доступна по адресу: http://YOUR_SERVER_IP:54321${plain}"
+    echo -e "${yellow}Логин: admin | Пароль: admin (измените после первого входа!)${plain}"
     echo -e "${blue}═══════════════════════════════════════════════════════════════${plain}"
     echo -e ""
     echo -e "${yellow}О скрипте:${plain}"
@@ -744,9 +971,13 @@ show_help() {
     echo -e "- Автоматическое определение архитектуры системы"
     echo -e "- Проверка версии GLIBC (требуется >= 2.27)"
     echo -e "- Установка зависимостей для различных дистрибутивов"
-    echo -e "- Автоматическое получение TLS сертификатов (Let's Encrypt)"
+    echo -e "- Автоматическая генерация самоподписанного TLS сертификата"
     echo -e "- Генерация безопасных паролей"
     echo -e "- Настройка systemd сервиса"
+    echo -e "- Веб-панель управления (аналог 3x-ui)"
+    echo -e "- Управление пользователями через веб-интерфейс"
+    echo -e "- QR-коды для быстрого подключения"
+    echo -e "- Статистика и мониторинг"
     echo -e "- Полное управление жизненным циклом сервиса"
     echo -e "${blue}═══════════════════════════════════════════════════════════════${plain}"
 }

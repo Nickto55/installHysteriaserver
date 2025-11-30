@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать пользователя - Hysteria UI{% endblock %}
+
+{% block content %}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-pencil-fill"></i> Редактировать пользователя: {{ user.username }}
+    </h1>
+    <a href="{{ url_for('users') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Назад к списку
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">Информация о пользователе</h6>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('edit_user', user_id=user.id) }}">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="username" class="form-label">
+                                    Имя пользователя <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="username" name="username" 
+                                       value="{{ user.username }}" required>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="password" class="form-label">
+                                    Новый пароль
+                                </label>
+                                <input type="text" class="form-control" id="password" name="password" 
+                                       placeholder="Оставьте пустым, чтобы не менять">
+                                <small class="form-text text-muted">Текущий: {{ user.password[:12] }}...</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="upload_mbps" class="form-label">
+                                    Скорость загрузки (Mbps)
+                                </label>
+                                <input type="number" class="form-control" id="upload_mbps" 
+                                       name="upload_mbps" value="{{ user.upload_mbps }}" min="1">
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="download_mbps" class="form-label">
+                                    Скорость скачивания (Mbps)
+                                </label>
+                                <input type="number" class="form-control" id="download_mbps" 
+                                       name="download_mbps" value="{{ user.download_mbps }}" min="1">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="total_traffic_gb" class="form-label">
+                                    Лимит трафика (GB)
+                                </label>
+                                <input type="number" class="form-control" id="total_traffic_gb" 
+                                       name="total_traffic_gb" value="{{ user.total_traffic_gb }}" min="0">
+                                <small class="form-text text-muted">
+                                    Использовано: {{ "%.2f"|format(user.used_traffic_gb) }} GB
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="expiry_date" class="form-label">
+                                    Дата истечения
+                                </label>
+                                <input type="date" class="form-control" id="expiry_date" 
+                                       name="expiry_date" value="{{ user.expiry_date or '' }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="is_active" 
+                                   name="is_active" {% if user.is_active %}checked{% endif %}>
+                            <label class="form-check-label" for="is_active">
+                                Аккаунт активен
+                            </label>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <a href="{{ url_for('users') }}" class="btn btn-secondary">
+                            <i class="bi bi-x-circle"></i> Отмена
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Сохранить изменения
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow mb-3">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="bi bi-info-circle"></i> Статистика
+                </h6>
+            </div>
+            <div class="card-body">
+                <p><strong>Создан:</strong><br>{{ user.created_at }}</p>
+                <p><strong>Последняя активность:</strong><br>
+                    {% if user.last_online %}
+                        {{ user.last_online }}
+                    {% else %}
+                        <span class="text-muted">Не подключался</span>
+                    {% endif %}
+                </p>
+                <p><strong>ID:</strong> {{ user.id }}</p>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Опасная зона
+                </h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    Удаление пользователя необратимо. Все данные будут потеряны.
+                </p>
+                <a href="{{ url_for('delete_user', user_id=user.id) }}" 
+                   class="btn btn-danger w-100" 
+                   onclick="return confirm('Вы уверены, что хотите удалить пользователя {{ user.username }}? Это действие необратимо!')">
+                    <i class="bi bi-trash-fill"></i> Удалить пользователя
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
