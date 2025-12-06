@@ -328,6 +328,38 @@ install_web_panel() {
     
     deactivate
     
+    # Определение IP сервера
+    echo -e "${blue}Определение IP сервера...${plain}"
+    local server_ip=$(curl -s4 ifconfig.me || curl -s4 icanhazip.com || echo "")
+    
+    # Обновление server_ip в базе данных после её инициализации
+    if [[ -n "$server_ip" ]]; then
+        echo -e "${green}Обнаружен IP: $server_ip${plain}"
+        # Запустим Python скрипт для обновления IP в БД
+        cat > "${HYSTERIA_UI_DIR}/update_ip.py" <<PYEOF
+import sqlite3
+import sys
+
+db_path = '/opt/hysteria-ui/hysteria.db'
+server_ip = sys.argv[1] if len(sys.argv) > 1 else ''
+
+if server_ip:
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("UPDATE settings SET value=? WHERE key='server_ip'", (server_ip,))
+    conn.commit()
+    conn.close()
+    print(f"IP обновлён в базе данных: {server_ip}")
+else:
+    print("IP не указан")
+PYEOF
+        
+        # Запускаем Python скрипт для обновления IP
+        ${HYSTERIA_UI_DIR}/venv/bin/python3 "${HYSTERIA_UI_DIR}/update_ip.py" "$server_ip"
+    else
+        echo -e "${yellow}Не удалось определить IP автоматически${plain}"
+    fi
+    
     # Создание systemd сервиса для веб-панели
     echo -e "${blue}Создание systemd сервиса для веб-панели...${plain}"
     
@@ -353,9 +385,17 @@ EOF
     systemctl enable hysteria-ui
     systemctl start hysteria-ui
     
-    sleep 2
+    sleep 3
     if systemctl is-active --quiet hysteria-ui; then
         echo -e "${green}✓ Веб-панель Hysteria UI успешно запущена!${plain}"
+        
+        # Ждем инициализации БД и обновляем IP
+        sleep 2
+        if [[ -f "${HYSTERIA_UI_DIR}/update_ip.py" ]] && [[ -n "$server_ip" ]]; then
+            echo -e "${blue}Обновление IP в базе данных...${plain}"
+            ${HYSTERIA_UI_DIR}/venv/bin/python3 "${HYSTERIA_UI_DIR}/update_ip.py" "$server_ip"
+        fi
+        
         return 0
     else
         echo -e "${red}✗ Ошибка запуска веб-панели${plain}"
@@ -570,6 +610,9 @@ EOF
         
         echo -e "${red}⚠ ВАЖНО: Измените пароль администратора после первого входа!${plain}\n"
     fi
+    
+    # Настройка firewall
+    configure_firewall
 }
 
 # ============================================================================
@@ -694,6 +737,108 @@ update_hysteria() {
             echo -e "${green}Восстановлена предыдущая версия${plain}"
         fi
     fi
+}
+
+# ============================================================================
+# Настройка Firewall
+# ============================================================================
+configure_firewall() {
+    echo -e "\n${blue}═══════════════ Настройка Firewall ═══════════════${plain}"
+    
+    # Проверка наличия firewall
+    if command -v ufw &>/dev/null; then
+        echo -e "${green}Обнаружен UFW${plain}"
+        
+        # Проверка активности UFW
+        if ufw status | grep -q "Status: active"; then
+            echo -e "${blue}Открытие портов в UFW...${plain}"
+            
+            # Hysteria порт (UDP обязательно!)
+            ufw allow 443/udp comment 'Hysteria Server'
+            ufw allow 443/tcp comment 'Hysteria Server (TCP)'
+            
+            # Веб-панель
+            echo -e "${yellow}Открыть порт 54321 для веб-панели?${plain}"
+            echo -e "${yellow}1) Да, открыть для всех${plain}"
+            echo -e "${yellow}2) Да, но только для моего IP${plain}"
+            echo -e "${yellow}3) Нет, использую SSH туннель${plain}"
+            read -p "Выбор [1-3]: " fw_choice
+            
+            case "$fw_choice" in
+                1)
+                    ufw allow 54321/tcp comment 'Hysteria UI Panel'
+                    echo -e "${green}✓ Порт 54321 открыт для всех${plain}"
+                    ;;
+                2)
+                    echo -e "${yellow}Определяю ваш IP...${plain}"
+                    local my_ip=$(curl -s4 ifconfig.me)
+                    if [[ -n "$my_ip" ]]; then
+                        ufw allow from "$my_ip" to any port 54321 comment 'Hysteria UI Panel'
+                        echo -e "${green}✓ Порт 54321 открыт только для $my_ip${plain}"
+                    else
+                        echo -e "${red}Не удалось определить IP${plain}"
+                    fi
+                    ;;
+                3)
+                    echo -e "${blue}Порт 54321 не открыт. Используйте SSH туннель:${plain}"
+                    echo -e "${yellow}ssh -L 54321:localhost:54321 root@${server_ip:-SERVER_IP}${plain}"
+                    ;;
+            esac
+            
+            ufw reload
+            echo -e "${green}✓ Firewall настроен${plain}"
+        else
+            echo -e "${yellow}UFW не активен. Активировать? (y/n)${plain}"
+            read -p "Ответ: " activate_ufw
+            if [[ "$activate_ufw" == "y" || "$activate_ufw" == "Y" ]]; then
+                ufw --force enable
+                configure_firewall
+            fi
+        fi
+        
+    elif command -v firewall-cmd &>/dev/null; then
+        echo -e "${green}Обнаружен FirewallD${plain}"
+        
+        if systemctl is-active --quiet firewalld; then
+            echo -e "${blue}Открытие портов в FirewallD...${plain}"
+            
+            firewall-cmd --add-port=443/udp --permanent
+            firewall-cmd --add-port=443/tcp --permanent
+            firewall-cmd --add-port=54321/tcp --permanent
+            firewall-cmd --reload
+            
+            echo -e "${green}✓ Firewall настроен${plain}"
+        else
+            echo -e "${yellow}FirewallD не запущен${plain}"
+        fi
+        
+    elif command -v iptables &>/dev/null; then
+        echo -e "${green}Обнаружен iptables${plain}"
+        echo -e "${blue}Открытие портов в iptables...${plain}"
+        
+        iptables -A INPUT -p udp --dport 443 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 54321 -j ACCEPT
+        
+        # Сохранение правил
+        if command -v netfilter-persistent &>/dev/null; then
+            netfilter-persistent save
+        elif command -v iptables-save &>/dev/null; then
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || iptables-save > /etc/sysconfig/iptables 2>/dev/null
+        fi
+        
+        echo -e "${green}✓ Firewall настроен${plain}"
+    else
+        echo -e "${yellow}Firewall не обнаружен${plain}"
+        echo -e "${yellow}Убедитесь, что порты 443 (UDP) и 54321 (TCP) открыты вручную${plain}"
+    fi
+    
+    echo -e "\n${blue}═══════════════════════════════════════════════════${plain}"
+    echo -e "${green}Открытые порты:${plain}"
+    echo -e "${yellow}  443/UDP  - Hysteria Server (ОБЯЗАТЕЛЬНО)${plain}"
+    echo -e "${yellow}  443/TCP  - Hysteria Server (маскировка)${plain}"
+    echo -e "${yellow}  54321/TCP - Веб-панель управления${plain}"
+    echo -e "${blue}═══════════════════════════════════════════════════${plain}\n"
 }
 
 # ============================================================================
@@ -874,14 +1019,15 @@ ${blue}════════════════════════�
 ${blue}═══════════════════════════════════════════════════════════════${plain}
 ${yellow}  Обслуживание${plain}
 ${blue}═══════════════════════════════════════════════════════════════${plain}
-  ${green}11.${plain} Обновить Hysteria
-  ${green}12.${plain} Удалить Hysteria и веб-панель
+  ${green}11.${plain} Настроить Firewall
+  ${green}12.${plain} Обновить Hysteria
+  ${green}13.${plain} Удалить Hysteria и веб-панель
 ${blue}═══════════════════════════════════════════════════════════════${plain}
   ${green}0.${plain} Выход
 ${blue}═══════════════════════════════════════════════════════════════${plain}
 "
     
-    read -p "Выберите действие [0-12]: " choice
+    read -p "Выберите действие [0-13]: " choice
     
     case "$choice" in
         1)
@@ -917,9 +1063,12 @@ ${blue}════════════════════════�
             status_panel
             ;;
         11)
-            update_hysteria
+            configure_firewall
             ;;
         12)
+            update_hysteria
+            ;;
+        13)
             uninstall_hysteria
             ;;
         0)
@@ -927,7 +1076,7 @@ ${blue}════════════════════════�
             exit 0
             ;;
         *)
-            echo -e "${red}Неверный выбор. Пожалуйста, выберите 0-12${plain}"
+            echo -e "${red}Неверный выбор. Пожалуйста, выберите 0-13${plain}"
             ;;
     esac
 }
@@ -950,6 +1099,7 @@ show_help() {
     echo -e "  ${green}restart${plain}     - Перезапустить сервис Hysteria"
     echo -e "  ${green}status${plain}      - Показать статус сервиса"
     echo -e "  ${green}log${plain}         - Показать логи сервиса"
+    echo -e "  ${green}firewall${plain}    - Настроить firewall (открыть порты)"
     echo -e "  ${green}update${plain}      - Обновить Hysteria до последней версии"
     echo -e "  ${green}uninstall${plain}   - Удалить Hysteria и веб-панель"
     echo -e "  ${green}help${plain}        - Показать эту справку"
@@ -1017,6 +1167,9 @@ else
             ;;
         log)
             log_hysteria
+            ;;
+        firewall)
+            configure_firewall
             ;;
         update)
             update_hysteria

@@ -125,6 +125,15 @@ def generate_hysteria_config():
     conn.close()
     
     # Формирование конфигурации
+    # Если есть пользователи, используем их пароли
+    # Если один пользователь - строка, если несколько - массив
+    if len(users) == 1:
+        auth_password = users[0]['auth_str']
+    elif len(users) > 1:
+        auth_password = [user['auth_str'] for user in users]
+    else:
+        auth_password = 'changeme'
+    
     config = {
         'listen': f":{settings.get('server_port', '443')}",
         'tls': {
@@ -133,7 +142,7 @@ def generate_hysteria_config():
         },
         'auth': {
             'type': 'password',
-            'password': []
+            'password': auth_password
         },
         'masquerade': {
             'type': 'proxy',
@@ -156,14 +165,6 @@ def generate_hysteria_config():
             'down': '1 gbps'
         }
     }
-    
-    # Добавление паролей пользователей
-    for user in users:
-        config['auth']['password'].append(user['auth_str'])
-    
-    # Если нет пользователей, добавляем пустой список
-    if not config['auth']['password']:
-        config['auth']['password'] = ['changeme']
     
     # Сохранение конфигурации
     try:
@@ -422,7 +423,20 @@ def user_connection(user_id):
         return redirect(url_for('users'))
     
     # Формирование URL
-    server_ip = settings.get('server_ip', 'SERVER_IP')
+    server_ip = settings.get('server_ip', '')
+    
+    # Если IP не задан в настройках, пытаемся определить автоматически
+    if not server_ip or server_ip == 'SERVER_IP':
+        try:
+            import requests
+            server_ip = requests.get('https://api.ipify.org', timeout=3).text
+        except:
+            try:
+                server_ip = subprocess.run(['curl', '-s4', 'ifconfig.me'], 
+                                         capture_output=True, text=True, timeout=3).stdout.strip()
+            except:
+                server_ip = 'YOUR_SERVER_IP'
+    
     server_port = settings.get('server_port', '443')
     hysteria_url = f"hysteria2://{user['password']}@{server_ip}:{server_port}/?insecure=1#{user['username']}"
     
