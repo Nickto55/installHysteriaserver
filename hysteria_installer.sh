@@ -328,36 +328,51 @@ install_web_panel() {
     
     deactivate
     
-    # Определение IP сервера
-    echo -e "${blue}Определение IP сервера...${plain}"
-    local server_ip=$(curl -s4 ifconfig.me || curl -s4 icanhazip.com || echo "")
+    # Определение адреса сервера из конфига Hysteria
+    echo -e "${blue}Определение адреса сервера...${plain}"
+    local server_address=""
+    local insecure_flag="1"
+    
+    if [[ -f "${HYSTERIA_CONFIG_DIR}/server_address.txt" ]]; then
+        server_address=$(cat "${HYSTERIA_CONFIG_DIR}/server_address.txt")
+        echo -e "${green}Адрес из конфига: $server_address${plain}"
+    else
+        server_address=$(curl -s4 ifconfig.me || curl -s4 icanhazip.com || echo "")
+        echo -e "${green}Обнаружен IP: $server_address${plain}"
+    fi
+    
+    if [[ -f "${HYSTERIA_CONFIG_DIR}/insecure_flag.txt" ]]; then
+        insecure_flag=$(cat "${HYSTERIA_CONFIG_DIR}/insecure_flag.txt")
+    fi
     
     # Обновление server_ip в базе данных после её инициализации
-    if [[ -n "$server_ip" ]]; then
-        echo -e "${green}Обнаружен IP: $server_ip${plain}"
-        # Запустим Python скрипт для обновления IP в БД
-        cat > "${HYSTERIA_UI_DIR}/update_ip.py" <<PYEOF
+    if [[ -n "$server_address" ]]; then
+        # Запустим Python скрипт для обновления настроек в БД
+        cat > "${HYSTERIA_UI_DIR}/update_settings.py" <<PYEOF
 import sqlite3
 import sys
 
 db_path = '/opt/hysteria-ui/hysteria.db'
-server_ip = sys.argv[1] if len(sys.argv) > 1 else ''
+server_address = sys.argv[1] if len(sys.argv) > 1 else ''
+insecure_flag = sys.argv[2] if len(sys.argv) > 2 else '1'
 
-if server_ip:
+if server_address:
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute("UPDATE settings SET value=? WHERE key='server_ip'", (server_ip,))
+    c.execute("UPDATE settings SET value=? WHERE key='server_ip'", (server_address,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('insecure_flag', ?)", (insecure_flag,))
     conn.commit()
     conn.close()
-    print(f"IP обновлён в базе данных: {server_ip}")
+    print(f"Адрес обновлён в базе данных: {server_address}")
+    print(f"Флаг insecure: {insecure_flag}")
 else:
-    print("IP не указан")
+    print("Адрес не указан")
 PYEOF
         
-        # Запускаем Python скрипт для обновления IP
-        ${HYSTERIA_UI_DIR}/venv/bin/python3 "${HYSTERIA_UI_DIR}/update_ip.py" "$server_ip"
+        # Запускаем Python скрипт для обновления настроек
+        ${HYSTERIA_UI_DIR}/venv/bin/python3 "${HYSTERIA_UI_DIR}/update_settings.py" "$server_address" "$insecure_flag"
     else
-        echo -e "${yellow}Не удалось определить IP автоматически${plain}"
+        echo -e "${yellow}Не удалось определить адрес автоматически${plain}"
     fi
     
     # Создание systemd сервиса для веб-панели
@@ -389,11 +404,11 @@ EOF
     if systemctl is-active --quiet hysteria-ui; then
         echo -e "${green}✓ Веб-панель Hysteria UI успешно запущена!${plain}"
         
-        # Ждем инициализации БД и обновляем IP
+        # Ждем инициализации БД и обновляем настройки
         sleep 2
-        if [[ -f "${HYSTERIA_UI_DIR}/update_ip.py" ]] && [[ -n "$server_ip" ]]; then
-            echo -e "${blue}Обновление IP в базе данных...${plain}"
-            ${HYSTERIA_UI_DIR}/venv/bin/python3 "${HYSTERIA_UI_DIR}/update_ip.py" "$server_ip"
+        if [[ -f "${HYSTERIA_UI_DIR}/update_settings.py" ]] && [[ -n "$server_address" ]]; then
+            echo -e "${blue}Обновление настроек в базе данных...${plain}"
+            ${HYSTERIA_UI_DIR}/venv/bin/python3 "${HYSTERIA_UI_DIR}/update_settings.py" "$server_address" "$insecure_flag"
         fi
         
         return 0
@@ -408,7 +423,10 @@ EOF
 # Генерация самоподписанного сертификата
 # ============================================================================
 generate_self_signed_cert() {
-    echo -e "${blue}Генерация самоподписанного сертификата...${plain}"
+    local domain="$1"
+    [[ -z "$domain" ]] && domain="hysteria.local"
+    
+    echo -e "${blue}Генерация самоподписанного сертификата для ${domain}...${plain}"
     
     mkdir -p "$HYSTERIA_CONFIG_DIR"
     
@@ -416,35 +434,151 @@ generate_self_signed_cert() {
     openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
         -keyout "${HYSTERIA_CONFIG_DIR}/private.key" \
         -out "${HYSTERIA_CONFIG_DIR}/cert.crt" \
-        -subj "/CN=hysteria.local" \
+        -subj "/CN=${domain}" \
         -days 36500 2>/dev/null
     
     if [[ $? -eq 0 ]]; then
         chmod 644 "${HYSTERIA_CONFIG_DIR}/cert.crt"
         chmod 600 "${HYSTERIA_CONFIG_DIR}/private.key"
-        echo -e "${green}Самоподписанный сертификат создан${plain}"
+        echo -e "${green}✓ Самоподписанный сертификат создан для ${domain}${plain}"
         return 0
     else
-        echo -e "${red}Ошибка: Не удалось создать сертификат${plain}"
+        echo -e "${red}✗ Ошибка: Не удалось создать сертификат${plain}"
         return 1
     fi
+}
+
+# ============================================================================
+# Настройка собственного SSL сертификата
+# ============================================================================
+setup_custom_cert() {
+    echo -e "${blue}═══════════════ Настройка собственного SSL сертификата ═══════════════${plain}"
+    
+    read -p "Введите путь к файлу сертификата (.crt/.pem): " cert_file
+    read -p "Введите путь к приватному ключу (.key): " key_file
+    
+    # Проверка существования файлов
+    if [[ ! -f "$cert_file" ]]; then
+        echo -e "${red}✗ Файл сертификата не найден: $cert_file${plain}"
+        return 1
+    fi
+    
+    if [[ ! -f "$key_file" ]]; then
+        echo -e "${red}✗ Файл ключа не найден: $key_file${plain}"
+        return 1
+    fi
+    
+    # Копирование сертификатов
+    mkdir -p "$HYSTERIA_CONFIG_DIR"
+    cp "$cert_file" "${HYSTERIA_CONFIG_DIR}/cert.crt"
+    cp "$key_file" "${HYSTERIA_CONFIG_DIR}/private.key"
+    
+    chmod 644 "${HYSTERIA_CONFIG_DIR}/cert.crt"
+    chmod 600 "${HYSTERIA_CONFIG_DIR}/private.key"
+    
+    echo -e "${green}✓ SSL сертификат успешно настроен${plain}"
+    return 0
 }
 
 # ============================================================================
 # Настройка Hysteria v2
 # ============================================================================
 config_hysteria() {
-    echo -e "${blue}=== Настройка Hysteria v2 ===${plain}"
+    echo -e "${blue}╔═══════════════════════════════════════════════════════════════╗${plain}"
+    echo -e "${blue}║              Настройка Hysteria v2 сервера                    ║${plain}"
+    echo -e "${blue}╚═══════════════════════════════════════════════════════════════╝${plain}\n"
     
-    # Генерация самоподписанного сертификата
-    generate_self_signed_cert
-    if [[ $? -ne 0 ]]; then
-        exit 1
+    # Выбор типа адреса (IP или домен)
+    local server_address
+    local use_domain=false
+    local insecure_flag="1"
+    
+    echo -e "${yellow}Выберите тип адреса сервера:${plain}"
+    echo -e "  ${green}1)${plain} IP адрес"
+    echo -e "  ${green}2)${plain} Доменное имя"
+    read -p "Ваш выбор [1-2]: " address_choice
+    
+    case "$address_choice" in
+        2)
+            use_domain=true
+            read -p "Введите доменное имя (например, vpn.example.com): " server_address
+            
+            # Проверка корректности домена
+            if [[ ! "$server_address" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$ ]]; then
+                echo -e "${red}✗ Некорректное доменное имя${plain}"
+                return 1
+            fi
+            
+            echo -e "${green}✓ Использование домена: $server_address${plain}"
+            ;;
+        *)
+            use_domain=false
+            server_address=$(curl -s4 ifconfig.me || curl -s4 icanhazip.com)
+            if [[ -z "$server_address" ]]; then
+                read -p "Не удалось определить IP автоматически. Введите IP вручную: " server_address
+            fi
+            echo -e "${green}✓ Использование IP: $server_address${plain}"
+            ;;
+    esac
+    
+    # Выбор типа SSL сертификата
+    echo -e "\n${yellow}Выберите тип SSL сертификата:${plain}"
+    echo -e "  ${green}1)${plain} Самоподписанный сертификат (быстро, для тестирования)"
+    echo -e "  ${green}2)${plain} Собственный SSL сертификат (рекомендуется для продакшена)"
+    read -p "Ваш выбор [1-2]: " cert_choice
+    
+    case "$cert_choice" in
+        2)
+            if ! setup_custom_cert; then
+                echo -e "${yellow}Ошибка настройки сертификата. Используется самоподписанный.${plain}"
+                generate_self_signed_cert "$server_address"
+                insecure_flag="1"
+            else
+                insecure_flag="0"
+                echo -e "${green}✓ Будет использован ваш SSL сертификат${plain}"
+            fi
+            ;;
+        *)
+            generate_self_signed_cert "$server_address"
+            insecure_flag="1"
+            ;;
+    esac
+    
+    # Ввод логина и пароля пользователя
+    echo -e "\n${blue}═══════════════ Создание пользователя Hysteria ═══════════════${plain}"
+    local username
+    local password
+    local password_confirm
+    
+    read -p "Введите имя пользователя: " username
+    
+    # Проверка имени пользователя
+    if [[ -z "$username" ]] || [[ ! "$username" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo -e "${red}✗ Некорректное имя пользователя (используйте только буквы, цифры, _ и -)${plain}"
+        return 1
     fi
     
-    # Генерация пароля
-    echo -e "${blue}Генерация пароля...${plain}"
-    local password=$(gen_random_string 32)
+    while true; do
+        read -sp "Введите пароль (минимум 8 символов): " password
+        echo
+        
+        if [[ ${#password} -lt 8 ]]; then
+            echo -e "${red}✗ Пароль слишком короткий (минимум 8 символов)${plain}"
+            continue
+        fi
+        
+        read -sp "Подтвердите пароль: " password_confirm
+        echo
+        
+        if [[ "$password" != "$password_confirm" ]]; then
+            echo -e "${red}✗ Пароли не совпадают${plain}"
+            continue
+        fi
+        
+        break
+    done
+    
+    echo -e "${green}✓ Пользователь создан: $username${plain}"
     
     # Создание конфигурационного файла
     echo -e "${blue}Создание конфигурационного файла...${plain}"
@@ -488,6 +622,10 @@ disableUDP: false
 
 udpIdleTimeout: 60s
 EOF
+    
+    # Сохранение типа адреса и insecure флага для веб-панели
+    echo "$server_address" > "${HYSTERIA_CONFIG_DIR}/server_address.txt"
+    echo "$insecure_flag" > "${HYSTERIA_CONFIG_DIR}/insecure_flag.txt"
 
     echo -e "${green}Конфигурационный файл создан: $HYSTERIA_CONFIG_FILE${plain}"
     
@@ -532,14 +670,8 @@ EOF
         exit 1
     fi
     
-    # Получение IP сервера
-    local server_ip=$(curl -s4 ifconfig.me)
-    if [[ -z "$server_ip" ]]; then
-        server_ip=$(hostname -I | awk '{print $1}')
-    fi
-    
-    # Формирование Hysteria2 URL (insecure=1 для самоподписанного сертификата)
-    local hysteria_url="hysteria2://${password}@${server_ip}:443/?insecure=1#Hysteria2"
+    # Формирование Hysteria2 URL
+    local hysteria_url="hysteria2://${password}@${server_address}:443/?insecure=${insecure_flag}#${username}"
     
     # Вывод информации для подключения
     echo -e "\n${green}╔═══════════════════════════════════════════════════════════════╗${plain}"
@@ -547,11 +679,16 @@ EOF
     echo -e "${green}╚═══════════════════════════════════════════════════════════════╝${plain}\n"
     
     echo -e "${blue}═══════════════ Информация для подключения ═══════════════${plain}"
-    echo -e "${yellow}IP:${plain}          $server_ip"
+    echo -e "${yellow}Адрес:${plain}       $server_address"
     echo -e "${yellow}Порт:${plain}        443"
     echo -e "${yellow}Протокол:${plain}    Hysteria2"
+    echo -e "${yellow}Пользователь:${plain} $username"
     echo -e "${yellow}Пароль:${plain}      $password"
-    echo -e "${yellow}TLS:${plain}         Самоподписанный сертификат (insecure=1)"
+    if [[ "$insecure_flag" == "1" ]]; then
+        echo -e "${yellow}TLS:${plain}         Самоподписанный сертификат (insecure=1)"
+    else
+        echo -e "${yellow}TLS:${plain}         Собственный SSL сертификат"
+    fi
     echo -e "${blue}═══════════════════════════════════════════════════════════${plain}\n"
     
     echo -e "${green}Hysteria2 URL:${plain}"
@@ -574,11 +711,12 @@ EOF
     cat > "$info_file" <<EOF
 Hysteria v2 Connection Information
 ===================================
-IP: $server_ip
+Address: $server_address
 Port: 443
 Protocol: Hysteria2
+Username: $username
 Password: $password
-TLS: Self-signed certificate (insecure=1)
+TLS: $([ "$insecure_flag" == "1" ] && echo "Self-signed certificate (insecure=1)" || echo "Custom SSL certificate")
 
 Hysteria2 URL:
 $hysteria_url
@@ -602,13 +740,62 @@ EOF
         echo -e "${green}║           Веб-панель Hysteria UI установлена!                ║${plain}"
         echo -e "${green}╚═══════════════════════════════════════════════════════════════╝${plain}\n"
         
-        echo -e "${blue}═══════════════ Доступ к веб-панели ═══════════════${plain}"
-        echo -e "${yellow}URL:${plain}         http://${server_ip}:${panel_port}"
-        echo -e "${yellow}Логин:${plain}       admin"
-        echo -e "${yellow}Пароль:${plain}      admin"
-        echo -e "${blue}═══════════════════════════════════════════════════${plain}\n"
+        echo -e "${blue}═══════════════ Настройка администратора веб-панели ═══════════════${plain}"
         
-        echo -e "${red}⚠ ВАЖНО: Измените пароль администратора после первого входа!${plain}\n"
+        local admin_username
+        local admin_password
+        local admin_password_confirm
+        
+        echo -e "${yellow}Создайте учетную запись администратора:${plain}"
+        read -p "Введите логин администратора: " admin_username
+        
+        if [[ -z "$admin_username" ]] || [[ ! "$admin_username" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo -e "${red}✗ Некорректный логин (используйте только буквы, цифры, _ и -)${plain}"
+            admin_username="admin"
+            admin_password="admin"
+            echo -e "${yellow}Используются учетные данные по умолчанию: admin/admin${plain}"
+        else
+            while true; do
+                read -sp "Введите пароль (минимум 8 символов): " admin_password
+                echo
+                
+                if [[ ${#admin_password} -lt 8 ]]; then
+                    echo -e "${red}✗ Пароль слишком короткий (минимум 8 символов)${plain}"
+                    continue
+                fi
+                
+                read -sp "Подтвердите пароль: " admin_password_confirm
+                echo
+                
+                if [[ "$admin_password" != "$admin_password_confirm" ]]; then
+                    echo -e "${red}✗ Пароли не совпадают${plain}"
+                    continue
+                fi
+                
+                break
+            done
+        fi
+        
+        # Создание администратора в БД
+        ${HYSTERIA_UI_DIR}/venv/bin/python3 -c "
+import sqlite3
+from werkzeug.security import generate_password_hash
+
+conn = sqlite3.connect('/opt/hysteria-ui/hysteria.db')
+c = conn.cursor()
+c.execute('DELETE FROM admins')
+c.execute('INSERT INTO admins (username, password) VALUES (?, ?)', 
+          ('$admin_username', generate_password_hash('$admin_password')))
+conn.commit()
+conn.close()
+print('Администратор создан')
+" 2>/dev/null
+        
+        echo -e "\n${blue}═══════════════ Доступ к веб-панели ═══════════════${plain}"
+        echo -e "${yellow}URL:${plain}         http://${server_address}:${panel_port}"
+        echo -e "${yellow}Логин:${plain}       $admin_username"
+        echo -e "${yellow}Пароль:${plain}      [установлен вами]"
+        echo -e "${blue}═══════════════════════════════════════════════════${plain}\n"
     fi
     
     # Настройка firewall

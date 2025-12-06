@@ -81,6 +81,7 @@ def init_db():
         'panel_port': '54321',
         'panel_path': '/hysteria',
         'server_ip': '',
+        'insecure_flag': '1',
         'cert_path': '/etc/hysteria/cert.crt',
         'key_path': '/etc/hysteria/private.key'
     }
@@ -438,7 +439,8 @@ def user_connection(user_id):
                 server_ip = 'YOUR_SERVER_IP'
     
     server_port = settings.get('server_port', '443')
-    hysteria_url = f"hysteria2://{user['password']}@{server_ip}:{server_port}/?insecure=1#{user['username']}"
+    insecure_flag = settings.get('insecure_flag', '1')
+    hysteria_url = f"hysteria2://{user['password']}@{server_ip}:{server_port}/?insecure={insecure_flag}#{user['username']}"
     
     # Генерация QR-кода
     qr_code = generate_qr_code(hysteria_url)
@@ -456,10 +458,10 @@ def settings():
     if request.method == 'POST':
         # Обновление настроек
         for key in ['server_port', 'panel_port', 'panel_path', 'server_ip', 
-                    'cert_path', 'key_path']:
+                    'insecure_flag', 'cert_path', 'key_path']:
             value = request.form.get(key)
-            if value:
-                c.execute("UPDATE settings SET value=? WHERE key=?", (value, key))
+            if value is not None:
+                c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         
         conn.commit()
         

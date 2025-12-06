@@ -23,12 +23,12 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="server_ip" class="form-label">
-                                    IP адрес сервера <span class="text-danger">*</span>
+                                    Адрес сервера <span class="text-danger">*</span>
                                 </label>
                                 <input type="text" class="form-control" id="server_ip" name="server_ip" 
-                                       value="{{ settings.server_ip }}" placeholder="1.2.3.4" required>
+                                       value="{{ settings.server_ip }}" placeholder="1.2.3.4 или vpn.example.com" required>
                                 <small class="form-text text-muted">
-                                    Публичный IP адрес вашего VPS
+                                    IP адрес или доменное имя вашего сервера
                                 </small>
                             </div>
                         </div>
@@ -65,6 +65,27 @@
                                 </label>
                                 <input type="text" class="form-control" id="key_path" name="key_path" 
                                        value="{{ settings.key_path }}">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="insecure_flag" class="form-label">
+                                    Тип SSL сертификата
+                                </label>
+                                <select class="form-control" id="insecure_flag" name="insecure_flag">
+                                    <option value="1" {% if settings.insecure_flag == '1' %}selected{% endif %}>
+                                        Самоподписанный (insecure=1)
+                                    </option>
+                                    <option value="0" {% if settings.insecure_flag == '0' %}selected{% endif %}>
+                                        Доверенный SSL сертификат
+                                    </option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    Влияет на параметр insecure в URL подключения
+                                </small>
                             </div>
                         </div>
                     </div>
